@@ -10,13 +10,12 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "@octokit/rest": "^20.0.2",
+    "@modelcontextprotocol/sdk": "latest",
+    "@octokit/rest": "^20.0.0",
     "express": "^4.21.0",
-    "cors": "^2.8.5"
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",
     "tsx": "^4.7.0",
