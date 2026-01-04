@@ -16,7 +16,7 @@ const octokit = new Octokit({ auth: GITHUB_TOKEN });
 function createServer() {
   const server = new McpServer({
     name: 'github-mcp-server',
-    version: '1.0.0',
+    version: '1.1.0',
   });
 
   server.tool('get_authenticated_user', 'Get the authenticated user info', {}, async () => {
@@ -82,7 +82,8 @@ function createServer() {
     }
   });
 
-  server.tool('get_file_contents', 'Get contents of a file in a repository', {
+  // FIXED: Now returns SHA along with content
+  server.tool('get_file_contents', 'Get contents of a file in a repository. Returns content and SHA (needed for updates).', {
     owner: z.string().describe('Repository owner'),
     repo: z.string().describe('Repository name'),
     path: z.string().describe('File path'),
@@ -90,9 +91,16 @@ function createServer() {
   }, async ({ owner, repo, path, ref }) => {
     try {
       const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
-      if ('content' in data) {
+      if ('content' in data && 'sha' in data) {
         const content = Buffer.from(data.content, 'base64').toString('utf-8');
-        return { content: [{ type: 'text', text: content }] };
+        // Return both content and SHA for easy updates
+        return { content: [{ type: 'text', text: JSON.stringify({
+          content,
+          sha: data.sha,
+          name: data.name,
+          path: data.path,
+          size: data.size
+        }, null, 2) }] };
       }
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     } catch (error) {
@@ -100,20 +108,72 @@ function createServer() {
     }
   });
 
-  server.tool('create_or_update_file', 'Create or update a file in a repository', {
+  // FIXED: Auto-fetches SHA if not provided for updates
+  server.tool('create_or_update_file', 'Create or update a file in a repository. SHA is auto-fetched for updates if not provided.', {
     owner: z.string().describe('Repository owner'),
     repo: z.string().describe('Repository name'),
     path: z.string().describe('File path'),
     message: z.string().describe('Commit message'),
     content: z.string().describe('File content'),
     branch: z.string().optional().describe('Branch name'),
-    sha: z.string().optional().describe('SHA of file being replaced (for updates)')
+    sha: z.string().optional().describe('SHA of file being replaced (auto-fetched if not provided)')
   }, async ({ owner, repo, path, message, content, branch, sha }) => {
     try {
+      let fileSha = sha;
+      
+      // Auto-fetch SHA if not provided (for updates)
+      if (!fileSha) {
+        try {
+          const { data: existingFile } = await octokit.repos.getContent({ owner, repo, path, ref: branch });
+          if ('sha' in existingFile) {
+            fileSha = existingFile.sha;
+            console.log(`Auto-fetched SHA for ${path}: ${fileSha}`);
+          }
+        } catch (e: any) {
+          // File doesn't exist, this is a create operation
+          if (e.status !== 404) {
+            throw e;
+          }
+          console.log(`File ${path} doesn't exist, creating new file`);
+        }
+      }
+
       const { data } = await octokit.repos.createOrUpdateFileContents({
         owner, repo, path, message,
         content: Buffer.from(content).toString('base64'),
-        branch, sha
+        branch, 
+        sha: fileSha
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: 'text', text: `Error: ${error}` }], isError: true };
+    }
+  });
+
+  // NEW: Delete a file from a repository
+  server.tool('delete_file', 'Delete a file from a repository. SHA is auto-fetched if not provided.', {
+    owner: z.string().describe('Repository owner'),
+    repo: z.string().describe('Repository name'),
+    path: z.string().describe('File path'),
+    message: z.string().describe('Commit message'),
+    branch: z.string().optional().describe('Branch name'),
+    sha: z.string().optional().describe('SHA of file to delete (auto-fetched if not provided)')
+  }, async ({ owner, repo, path, message, branch, sha }) => {
+    try {
+      let fileSha = sha;
+      
+      // Auto-fetch SHA if not provided
+      if (!fileSha) {
+        const { data: existingFile } = await octokit.repos.getContent({ owner, repo, path, ref: branch });
+        if ('sha' in existingFile) {
+          fileSha = existingFile.sha;
+        } else {
+          return { content: [{ type: 'text', text: 'Error: Could not get file SHA' }], isError: true };
+        }
+      }
+
+      const { data } = await octokit.repos.deleteFile({
+        owner, repo, path, message, sha: fileSha, branch
       });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     } catch (error) {
@@ -263,8 +323,9 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ 
     status: 'healthy', 
     service: 'GitHub MCP SSE Server', 
-    version: '1.0.0',
-    timestamp: new Date().toISOString() 
+    version: '1.1.0',
+    timestamp: new Date().toISOString(),
+    fixes: ['Auto-fetch SHA for file updates', 'Return SHA in get_file_contents', 'Added delete_file tool']
   });
 });
 
@@ -329,7 +390,7 @@ app.options('*', (req: Request, res: Response) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`GitHub MCP SSE Server running on port ${PORT}`);
+  console.log(`GitHub MCP SSE Server v1.1.0 running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
 });
