@@ -16,7 +16,7 @@ const octokit = new Octokit({ auth: GITHUB_TOKEN });
 function createServer() {
   const server = new McpServer({
     name: 'github-mcp-server',
-    version: '1.1.0',
+    version: '1.2.0',
   });
 
   server.tool('get_authenticated_user', 'Get the authenticated user info', {}, async () => {
@@ -65,6 +65,40 @@ function createServer() {
         name, description, private: isPrivate, auto_init 
       });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: 'text', text: `Error: ${error}` }], isError: true };
+    }
+  });
+
+  // NEW: Rename a repository
+  server.tool('rename_repository', 'Rename a repository. Can also update description, visibility, and other settings.', {
+    owner: z.string().describe('Repository owner'),
+    repo: z.string().describe('Current repository name'),
+    new_name: z.string().describe('New repository name'),
+    description: z.string().optional().describe('New description (optional)'),
+    private: z.boolean().optional().describe('Change visibility (optional)'),
+    homepage: z.string().optional().describe('New homepage URL (optional)'),
+    has_issues: z.boolean().optional().describe('Enable/disable issues (optional)'),
+    has_wiki: z.boolean().optional().describe('Enable/disable wiki (optional)')
+  }, async ({ owner, repo, new_name, description, private: isPrivate, homepage, has_issues, has_wiki }) => {
+    try {
+      const updateParams: any = { owner, repo, name: new_name };
+      if (description !== undefined) updateParams.description = description;
+      if (isPrivate !== undefined) updateParams.private = isPrivate;
+      if (homepage !== undefined) updateParams.homepage = homepage;
+      if (has_issues !== undefined) updateParams.has_issues = has_issues;
+      if (has_wiki !== undefined) updateParams.has_wiki = has_wiki;
+
+      const { data } = await octokit.repos.update(updateParams);
+      return { content: [{ type: 'text', text: JSON.stringify({
+        success: true,
+        old_name: repo,
+        new_name: data.name,
+        full_name: data.full_name,
+        url: data.html_url,
+        description: data.description,
+        private: data.private
+      }, null, 2) }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `Error: ${error}` }], isError: true };
     }
@@ -323,9 +357,9 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ 
     status: 'healthy', 
     service: 'GitHub MCP SSE Server', 
-    version: '1.1.0',
+    version: '1.2.0',
     timestamp: new Date().toISOString(),
-    fixes: ['Auto-fetch SHA for file updates', 'Return SHA in get_file_contents', 'Added delete_file tool']
+    tools: ['rename_repository', 'delete_file', 'create_or_update_file', 'get_file_contents', 'list_repositories', 'and more']
   });
 });
 
@@ -390,7 +424,7 @@ app.options('*', (req: Request, res: Response) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`GitHub MCP SSE Server v1.1.0 running on port ${PORT}`);
+  console.log(`GitHub MCP SSE Server v1.2.0 running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
 });
