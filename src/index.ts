@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { Octokit } from '@octokit/rest';
 import { z } from 'zod';
+import { registerOAuth, requireBearer, authEnabled } from './mcp-auth.js';
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
@@ -25,7 +26,7 @@ function err(error: unknown) {
 function createServer() {
   const server = new McpServer({
     name: 'github-mcp-server',
-    version: '3.0.0',
+    version: '3.1.0',
   });
 
   // ==================== USER ====================
@@ -1206,18 +1207,27 @@ function createServer() {
 const app = express();
 const transports: Record<string, SSEServerTransport> = {};
 
+const BASE_URL =
+  process.env.SERVER_URL ||
+  (process.env.RAILWAY_PUBLIC_DOMAIN
+    ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
+    : 'http://localhost:' + (process.env.PORT || 3000));
+
 app.get('/health', (_req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.json({
     status: 'healthy',
     service: 'GitHub MCP SSE Server',
-    version: '3.0.0',
+    version: '3.1.0',
     timestamp: new Date().toISOString(),
-    tool_count: TOOL_COUNT
+    tool_count: TOOL_COUNT,
+    auth: authEnabled
   });
 });
 
-app.get('/sse', async (req: Request, res: Response) => {
+registerOAuth(app, { baseUrl: BASE_URL, clientPrefix: 'github-mcp' });
+
+app.get('/sse', requireBearer(BASE_URL), async (req: Request, res: Response) => {
   console.log('New SSE connection request');
   const transport = new SSEServerTransport('/message', res);
   transports[transport.sessionId] = transport;
@@ -1239,7 +1249,7 @@ app.get('/sse', async (req: Request, res: Response) => {
   console.log(`MCP server connected for session: ${sessionId}`);
 });
 
-app.post('/message', async (req: Request, res: Response) => {
+app.post('/message', requireBearer(BASE_URL), async (req: Request, res: Response) => {
   const sessionId = req.query.sessionId as string;
   console.log(`Message received for session: ${sessionId}`);
   const transport = transports[sessionId];
@@ -1266,7 +1276,7 @@ app.options('*', (req: Request, res: Response) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`GitHub MCP SSE Server v3.0.0 running on port ${PORT}`);
+  console.log(`GitHub MCP SSE Server v3.1.0 running on port ${PORT}`);
   console.log(`${TOOL_COUNT} tools available`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
