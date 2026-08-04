@@ -4,6 +4,9 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { Octokit } from '@octokit/rest';
 import { z } from 'zod';
 import { registerOAuth, requireBearer, authEnabled } from './mcp-auth.js';
+import { installProcessGuards, guardSseSocket } from './process-guards.js';
+
+installProcessGuards('github-mcp');
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
@@ -26,7 +29,7 @@ function err(error: unknown) {
 function createServer() {
   const server = new McpServer({
     name: 'github-mcp-server',
-    version: '3.1.0',
+    version: '3.1.1',
   });
 
   // ==================== USER ====================
@@ -1218,7 +1221,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     service: 'GitHub MCP SSE Server',
-    version: '3.1.0',
+    version: '3.1.1',
     timestamp: new Date().toISOString(),
     tool_count: TOOL_COUNT,
     auth: authEnabled
@@ -1228,6 +1231,7 @@ app.get('/health', (_req: Request, res: Response) => {
 registerOAuth(app, { baseUrl: BASE_URL, clientPrefix: 'github-mcp' });
 
 app.get('/sse', requireBearer(BASE_URL), async (req: Request, res: Response) => {
+  guardSseSocket(req, res);
   console.log('New SSE connection request');
   const transport = new SSEServerTransport('/message', res);
   transports[transport.sessionId] = transport;
@@ -1276,7 +1280,7 @@ app.options('*', (req: Request, res: Response) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`GitHub MCP SSE Server v3.1.0 running on port ${PORT}`);
+  console.log(`GitHub MCP SSE Server v3.1.1 running on port ${PORT}`);
   console.log(`${TOOL_COUNT} tools available`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
